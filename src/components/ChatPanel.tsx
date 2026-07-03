@@ -20,7 +20,7 @@ interface ChatPanelProps {
   pedirTranscripcion: (msg: Message) => void;
   isTranscribing: Record<string, boolean>;
   transcriptions: Record<string, string>;
-  messagesEndRef: React.RefObject<HTMLDivElement>;
+  messagesEndRef: React.RefObject<HTMLDivElement | null>;
   attachment: { file: File, base64: string, type: 'image' | 'document' } | null;
   setAttachment: React.Dispatch<React.SetStateAction<{ file: File, base64: string, type: 'image' | 'document' } | null>>;
   showSnippets: boolean;
