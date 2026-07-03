@@ -14,7 +14,7 @@ import AgendaPanel from "../components/AgendaPanel";
 import CatalogModal from "../components/CatalogModal"; 
 import ChatPanel from "../components/ChatPanel"; 
 
-const socket = io("http://localhost:3001");
+const socket = io("https://jared-crm-backend.onrender.com");
 
 const DEFAULT_REPLIES: QuickReply[] = [
   { shortcut: "/saludo", text: "¡Hola! Gracias por comunicarte con Electrodomésticos Jared. ¿En qué te podemos ayudar hoy?" },
