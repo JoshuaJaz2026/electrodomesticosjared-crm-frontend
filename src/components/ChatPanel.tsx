@@ -34,7 +34,7 @@ interface ChatPanelProps {
   isAIGenerating: boolean;
   setIsAIGenerating: React.Dispatch<React.SetStateAction<boolean>>;
   setIsCatalogModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  inputRef: React.RefObject<HTMLInputElement>;
+  inputRef: React.RefObject<HTMLInputElement | null>;
   inputText: string;
   handleInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   socket: any; 
