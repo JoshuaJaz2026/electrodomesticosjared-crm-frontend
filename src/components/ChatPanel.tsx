@@ -256,7 +256,7 @@ export default function ChatPanel({
             <button
               type="button"
               onClick={() => {
-                if (isAIGenerating) return;
+                if (!activeChat || isAIGenerating) return;
                 setIsAIGenerating(true);
                 socket.emit('ai-generate-reply', { chatId: activeChat.id });
               }}
