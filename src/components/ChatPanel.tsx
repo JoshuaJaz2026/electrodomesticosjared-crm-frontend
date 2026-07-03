@@ -1,5 +1,5 @@
 import React from 'react';
-import { Send, Zap, Package, Paperclip, StickyNote, Loader2, Image as ImageIcon, FileText, Bot, Archive, Info, Check, CheckCheck, MessageSquare, Sparkles } from 'lucide-react';
+import { Send, Zap, Package, Paperclip, StickyNote, Loader2, Image as ImageIcon, FileText, Bot, Archive, Info, Check, CheckCheck, MessageSquare, Sparkles, X } from 'lucide-react';
 import { Chat, Message, CRMData, QuickReply } from '../types';
 
 interface ChatPanelProps {
