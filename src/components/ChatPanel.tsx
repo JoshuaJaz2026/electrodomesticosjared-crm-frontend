@@ -27,7 +27,7 @@ interface ChatPanelProps {
   filteredSnippets: QuickReply[];
   handleSelectSnippet: (text: string) => void;
   handleSendMessage: (e: React.FormEvent) => void;
-  fileInputRef: React.RefObject<HTMLInputElement>;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   isNoteMode: boolean;
   setIsNoteMode: React.Dispatch<React.SetStateAction<boolean>>;
