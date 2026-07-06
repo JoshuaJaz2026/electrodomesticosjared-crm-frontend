@@ -67,6 +67,7 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
   const [phoneNumber, setPhoneNumber] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [isRequestingCode, setIsRequestingCode] = useState(false);
+  const [isPairingLocked, setIsPairingLocked] = useState(false);
   const [pairingError, setPairingError] = useState("");
 
   useEffect(() => {
@@ -89,11 +90,13 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
 
     // ESCUCHADORES DE CONEXIÓN
     socket.on('whatsapp-qr', (qr: string) => {
+    if (!isPairingLocked) { // EL ESCUDO: Solo actualiza el QR si no estás vinculando por código
         setQrCode(qr);
         setIsBotConnected(false);
         setPairingCode(null);
         setIsRequestingCode(false);
-    });
+    }
+});
     
     socket.on('pairing-code-success', (data: { code: string }) => {
         setPairingCode(data.code);
@@ -196,12 +199,13 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
   };
 
   const handleRequestPairingCode = (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!phoneNumber.trim()) return alert("Ingresa un número válido");
-      setIsRequestingCode(true);
-      setPairingError("");
-      socket.emit('request-pairing-code', { phoneNumber });
-  };
+    e.preventDefault();
+    if (!phoneNumber.trim()) return alert("Ingresa un número válido");
+    setIsRequestingCode(true);
+    setIsPairingLocked(true); // ACTIVAR EL ESCUDO
+    setPairingError("");
+    socket.emit('request-pairing-code', { phoneNumber });
+};
 
   // Calculadora de ganancia en tiempo real
   const expectedProfit = (Number(newProductPrice) || 0) - (Number(newProductCost) || 0);
