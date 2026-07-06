@@ -6,6 +6,8 @@ import { AppUser } from "../types";
 type Product = {
   id: number;
   name: string;
+  brand?: string;
+  cost_price?: number;
   price: number;
   stock: number;
   category: string;
@@ -28,24 +30,30 @@ type AdminPanelProps = {
 };
 
 export default function AdminPanel({ isOpen, onClose, agentName, socket }: AdminPanelProps) {
-  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [activeTab, setActiveTab] = useState('conexiones');
   
   // Estados para Usuarios
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState("asesor");
   const [userError, setUserError] = useState("");
   
-  // Estados para Productos
+  // Estados para Inventario (Avanzado)
+  const [products, setProducts] = useState<Product[]>([]);
   const [newProductName, setNewProductName] = useState("");
+  const [newProductBrand, setNewProductBrand] = useState("");
+  const [newProductCost, setNewProductCost] = useState("");
   const [newProductPrice, setNewProductPrice] = useState("");
   const [newProductStock, setNewProductStock] = useState("");
-  const [newProductCategory, setNewProductCategory] = useState("Televisores");
-  
+  const [newProductCategory, setNewProductCategory] = useState("Licuadoras");
   const [imageBase64, setImageBase64] = useState<string>("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Estados de Paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 6; // Cuántos productos se mostrarán por página
 
   // Estados para el Chatbot
   const [botSettings, setBotSettings] = useState<BotSettings>({
@@ -53,12 +61,13 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
   });
   const [isSavingBot, setIsSavingBot] = useState(false);
 
-  // 🌟 NUEVO: Estados para Multi-Sesión (WhatsApp)
-  const [sessions, setSessions] = useState<string[]>([]);
-  const [qrData, setQrData] = useState<{sessionId: string, qr: string} | null>(null);
-
-  // Iniciar en la pestaña de conexiones por defecto para ver el QR
-  const [activeTab, setActiveTab] = useState('conexiones');
+  // Estados Monolíticos para la Conexión Única
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [isBotConnected, setIsBotConnected] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [isRequestingCode, setIsRequestingCode] = useState(false);
+  const [pairingError, setPairingError] = useState("");
 
   useEffect(() => {
     if (!isOpen) return;
@@ -66,28 +75,45 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
     socket.emit('get-users');
     socket.emit('get-products');
     socket.emit('get-bot-settings');
-    socket.emit('get-sessions'); // Pedimos las sesiones activas
+    socket.emit('check-status');
 
     const handleLoadUsers = (users: AppUser[]) => setAppUsers(users);
     const handleUserError = (msg: string) => setUserError(msg);
     const handleLoadProducts = (data: Product[]) => setProducts(data);
-    const handleLoadBotSettings = (data: BotSettings) => setBotSettings(data);
-    const handleLoadSessions = (data: string[]) => setSessions(data);
+    const handleLoadBotSettings = (data: BotSettings) => { if(data) setBotSettings(data); };
 
     socket.on('load-users', handleLoadUsers);
     socket.on('user-error', handleUserError);
     socket.on('load-products', handleLoadProducts);
     socket.on('load-bot-settings', handleLoadBotSettings);
-    socket.on('load-sessions', handleLoadSessions);
 
-    // 🌟 ESCUCHADORES DEL QR Y CONEXIONES
-    socket.on('qr', (data: any) => setQrData(data));
-    socket.on('session-ready', (data: any) => {
-        setQrData(null);
-        setSessions(prev => [...new Set([...prev, data.sessionId])]);
+    // ESCUCHADORES DE CONEXIÓN
+    socket.on('whatsapp-qr', (qr: string) => {
+        setQrCode(qr);
+        setIsBotConnected(false);
+        setPairingCode(null);
+        setIsRequestingCode(false);
     });
-    socket.on('session-disconnected', (data: any) => {
-        setSessions(prev => prev.filter(s => s !== data.sessionId));
+    
+    socket.on('pairing-code-success', (data: { code: string }) => {
+        setPairingCode(data.code);
+        setIsRequestingCode(false);
+    });
+
+    socket.on('pairing-error', (msg: string) => {
+        setPairingError(msg);
+        setIsRequestingCode(false);
+    });
+
+    socket.on('whatsapp-ready', () => {
+        setIsBotConnected(true);
+        setQrCode(null);
+        setPairingCode(null);
+    });
+
+    socket.on('whatsapp-disconnected', () => {
+        setIsBotConnected(false);
+        setQrCode(null);
     });
 
     return () => {
@@ -95,10 +121,11 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
       socket.off('user-error', handleUserError);
       socket.off('load-products', handleLoadProducts);
       socket.off('load-bot-settings', handleLoadBotSettings);
-      socket.off('load-sessions', handleLoadSessions);
-      socket.off('qr');
-      socket.off('session-ready');
-      socket.off('session-disconnected');
+      socket.off('whatsapp-qr');
+      socket.off('pairing-code-success');
+      socket.off('pairing-error');
+      socket.off('whatsapp-ready');
+      socket.off('whatsapp-disconnected');
     };
   }, [isOpen, socket]);
 
@@ -137,18 +164,23 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
   // Funciones de Productos
   const handleCreateProduct = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProductName || !newProductPrice || !newProductStock || !imageBase64) {
-        alert("Completa todos los campos y sube una imagen.");
+    if (!newProductName || !newProductPrice || !imageBase64) {
+        alert("Completa al menos el nombre, el precio de venta y sube una imagen.");
         return;
     }
     
     socket.emit('add-product', {
-      name: newProductName, price: parseFloat(newProductPrice),
-      stock: parseInt(newProductStock), category: newProductCategory, image: imageBase64 
+      name: newProductName, 
+      brand: newProductBrand || "Genérico",
+      costPrice: Number(newProductCost) || 0,
+      price: parseFloat(newProductPrice),
+      stock: parseInt(newProductStock) || 0, 
+      category: newProductCategory, 
+      image: imageBase64 
     });
 
-    setNewProductName(""); setNewProductPrice(""); setNewProductStock(""); 
-    setImageBase64(""); setImagePreview(null);
+    setNewProductName(""); setNewProductBrand(""); setNewProductCost(""); setNewProductPrice(""); 
+    setNewProductStock(""); setImageBase64(""); setImagePreview(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -156,7 +188,6 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
     if (confirm(`¿Seguro que deseas eliminar el producto: ${name}?`)) socket.emit('delete-product', id);
   };
 
-  // Función para guardar configuración del Chatbot
   const handleSaveBotSettings = (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingBot(true);
@@ -164,91 +195,143 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
     setTimeout(() => setIsSavingBot(false), 800);
   };
 
+  const handleRequestPairingCode = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!phoneNumber.trim()) return alert("Ingresa un número válido");
+      setIsRequestingCode(true);
+      setPairingError("");
+      socket.emit('request-pairing-code', { phoneNumber });
+  };
+
+  // Calculadora de ganancia en tiempo real
+  const expectedProfit = (Number(newProductPrice) || 0) - (Number(newProductCost) || 0);
+
   if (!isOpen) return null;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0f111a] overflow-hidden animate-in fade-in duration-300">
         
+      {/* HEADER */}
       <header className="p-6 bg-[#131620] border-b border-white/5 flex justify-between items-center z-10 flex-shrink-0">
         <div>
           <h2 className="font-bold text-2xl text-white flex items-center gap-2">
             <Shield className="w-7 h-7 text-purple-500"/> Ajustes y Administración
           </h2>
-          <p className="text-sm text-slate-400 mt-1">Administra los usuarios, permisos, conexiones e inventario.</p>
+          <p className="text-sm text-slate-400 mt-1">Administra tu equipo, inventario, asistente virtual y conexiones.</p>
         </div>
         
         <div className="flex gap-1 bg-[#0b0e14] p-1 rounded-xl border border-white/5">
-             {/* 🌟 NUEVO BOTÓN DE CONEXIONES */}
              <button onClick={() => setActiveTab('conexiones')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'conexiones' ? 'bg-blue-600 shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Smartphone className="w-4 h-4"/> Conexiones</button>
-             <button onClick={() => setActiveTab('usuarios')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'usuarios' ? 'bg-[#1a1d2d] shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}>Asesores</button>
+             <button onClick={() => setActiveTab('usuarios')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'usuarios' ? 'bg-[#1a1d2d] shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Users className="w-4 h-4"/> Asesores</button>
              <button onClick={() => setActiveTab('inventario')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'inventario' ? 'bg-purple-600 shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Package className="w-4 h-4"/> Inventario</button>
              <button onClick={() => setActiveTab('chatbot')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'chatbot' ? 'bg-emerald-600 shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Bot className="w-4 h-4"/> Chatbot</button>
-             <button onClick={() => setActiveTab('seguridad')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'seguridad' ? 'bg-[#1a1d2d] shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}>Seguridad</button>
+             <button onClick={() => setActiveTab('seguridad')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'seguridad' ? 'bg-[#1a1d2d] shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Settings className="w-4 h-4"/> Seguridad</button>
         </div>
       </header>
       
+      {/* CONTENIDO PRINCIPAL */}
       <div className="flex-1 overflow-y-auto p-8">
           
-          {/* 🌟 PESTAÑA: CONEXIONES */}
+          {/* PESTAÑA: CONEXIONES */}
           {activeTab === 'conexiones' && (
               <div className="max-w-4xl mx-auto animate-in fade-in duration-300">
                   <div className="mb-8">
-                      <h3 className="text-xl font-bold text-white mb-2">Conexiones de WhatsApp</h3>
-                      <p className="text-sm text-slate-400">Vincula o desconecta los números de teléfono de tu empresa.</p>
+                      <h3 className="text-xl font-bold text-white mb-2">Conexión de WhatsApp</h3>
+                      <p className="text-sm text-slate-400">Vincula o desconecta el número de teléfono de tu empresa.</p>
                   </div>
 
-                  {qrData ? (
-                      <div className="bg-[#131620] border border-blue-500/30 shadow-xl shadow-blue-900/10 rounded-2xl p-10 flex flex-col items-center justify-center gap-6 text-center">
+                  {isBotConnected ? (
+                      <div className="bg-[#131620] border border-white/5 rounded-2xl overflow-hidden">
+                          <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#0b0e14]">
+                              <h4 className="font-bold text-white flex items-center gap-2">
+                                  <Smartphone className="w-5 h-5 text-emerald-500" /> Línea Principal
+                              </h4>
+                          </div>
+                          <div className="p-6 flex flex-col gap-4">
+                              <div className="bg-[#0b0e14] border border-white/5 rounded-xl p-5 flex items-center justify-between hover:border-white/10 transition-colors">
+                                  <div className="flex items-center gap-4">
+                                      <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+                                          <Smartphone className="w-6 h-6 text-emerald-500" />
+                                      </div>
+                                      <div>
+                                          <p className="text-white font-bold text-lg">WhatsApp Empresa</p>
+                                          <p className="text-emerald-400 text-xs font-medium flex items-center gap-1.5 mt-1">
+                                              <span className="relative flex h-2 w-2">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                              </span>
+                                              Conectado y Operativo
+                                          </p>
+                                      </div>
+                                  </div>
+                                  <button className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-sm font-bold transition-colors">
+                                      Desconectar
+                                  </button>
+                              </div>
+                          </div>
+                      </div>
+                  ) : pairingCode ? (
+                      <div className="bg-[#131620] border border-blue-500/30 shadow-xl shadow-blue-900/10 rounded-2xl p-10 flex flex-col items-center justify-center gap-6 text-center animate-in zoom-in-95 duration-300">
                           <div className="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mb-2">
                               <Smartphone className="w-8 h-8 text-blue-400 animate-pulse" />
                           </div>
                           <div>
-                              <h4 className="text-2xl font-bold text-white mb-2">Escanea el código QR</h4>
-                              <p className="text-slate-400 text-sm max-w-md mx-auto">
-                                  Para conectar la línea <strong className="text-blue-400">{qrData.sessionId}</strong>, abre WhatsApp en tu celular, ve a "Dispositivos vinculados" y apunta la cámara hacia este código.
+                              <h4 className="text-2xl font-bold text-white mb-2">Código de Vinculación</h4>
+                              <p className="text-slate-400 text-sm max-w-md mx-auto mb-4">
+                                  En tu celular, abre WhatsApp {'>'} Dispositivos vinculados {'>'} Vincular con el número de teléfono. Escribe el siguiente código:
                               </p>
                           </div>
-                          <div className="bg-white p-6 rounded-2xl shadow-2xl mt-4">
-                              <QRCode value={qrData.qr} size={250} />
+                          <div className="text-4xl sm:text-5xl font-black text-blue-400 tracking-[0.3em] bg-[#0b0e14] py-6 px-10 rounded-2xl border border-blue-500/30 shadow-inner">
+                              {pairingCode}
+                          </div>
+                          <p className="text-xs text-slate-500 mt-4">Esperando autenticación de WhatsApp...</p>
+                      </div>
+                  ) : qrCode ? (
+                      <div className="bg-[#131620] border border-blue-500/30 shadow-xl shadow-blue-900/10 rounded-2xl p-10 flex flex-col lg:flex-row items-center justify-center gap-10 text-center lg:text-left">
+                          <div className="flex flex-col items-center">
+                              <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mb-4">
+                                  <Smartphone className="w-6 h-6 text-blue-400 animate-pulse" />
+                              </div>
+                              <h4 className="text-lg font-bold text-white mb-2">Opción 1: Escanear QR</h4>
+                              <p className="text-xs text-slate-400 max-w-[200px] text-center mb-4">Abre WhatsApp en tu celular y escanea este código.</p>
+                              <div className="bg-white p-4 rounded-xl shadow-xl">
+                                  <QRCode value={qrCode} size={180} />
+                              </div>
+                          </div>
+
+                          <div className="hidden lg:flex w-px h-64 bg-white/10"></div>
+                          <div className="flex lg:hidden h-px w-full bg-white/10 my-2"></div>
+
+                          <div className="flex flex-col items-center lg:items-start w-full max-w-sm">
+                              <h4 className="text-lg font-bold text-white mb-2">Opción 2: Usar Código</h4>
+                              <p className="text-slate-400 text-xs mb-6 text-center lg:text-left">Si la cámara te da problemas, ingresa el número de WhatsApp de tu empresa (incluye código de país).</p>
+                              
+                              <form onSubmit={handleRequestPairingCode} className="w-full flex flex-col gap-4">
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Número de Teléfono</label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Ej: 51987654321" 
+                                        value={phoneNumber}
+                                        onChange={(e) => setPhoneNumber(e.target.value)}
+                                        className="w-full mt-1 p-3 bg-[#0b0e14] border border-white/5 rounded-xl text-sm font-semibold outline-none focus:ring-1 focus:ring-blue-500 text-white transition-all"
+                                    />
+                                  </div>
+                                  {pairingError && <p className="text-xs text-rose-400 font-bold bg-rose-500/10 p-2 rounded-lg text-center border border-rose-500/20">{pairingError}</p>}
+                                  
+                                  <button 
+                                      type="submit" 
+                                      disabled={isRequestingCode || !phoneNumber}
+                                      className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-bold transition-all shadow-lg shadow-blue-900/20"
+                                  >
+                                      {isRequestingCode ? 'Solicitando...' : 'Generar Código (8 dígitos)'}
+                                  </button>
+                              </form>
                           </div>
                       </div>
                   ) : (
-                      <div className="bg-[#131620] border border-white/5 rounded-2xl overflow-hidden">
-                          <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#0b0e14]">
-                              <h4 className="font-bold text-white flex items-center gap-2">
-                                  <Smartphone className="w-5 h-5 text-emerald-500" /> Líneas Activas
-                              </h4>
-                          </div>
-                          <div className="p-6 flex flex-col gap-4">
-                              {sessions.length === 0 ? (
-                                  <div className="text-center py-8 text-slate-500 text-sm bg-[#0b0e14] rounded-xl border border-white/5">
-                                      No hay sesiones activas. Reinicia el servidor para generar una.
-                                  </div>
-                              ) : (
-                                  sessions.map((session, idx) => (
-                                      <div key={idx} className="bg-[#0b0e14] border border-white/5 rounded-xl p-5 flex items-center justify-between hover:border-white/10 transition-colors">
-                                          <div className="flex items-center gap-4">
-                                              <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
-                                                  <Smartphone className="w-6 h-6 text-emerald-500" />
-                                              </div>
-                                              <div>
-                                                  <p className="text-white font-bold text-lg">{session}</p>
-                                                  <p className="text-emerald-400 text-xs font-medium flex items-center gap-1.5 mt-1">
-                                                      <span className="relative flex h-2 w-2">
-                                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                                      </span>
-                                                      Conectado y Operativo
-                                                  </p>
-                                              </div>
-                                          </div>
-                                          <button className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-sm font-bold transition-colors">
-                                              Desconectar
-                                          </button>
-                                      </div>
-                                  ))
-                              )}
-                          </div>
+                      <div className="text-center py-8 text-slate-500 text-sm bg-[#0b0e14] rounded-xl border border-white/5 animate-pulse">
+                          Esperando conexión con el servidor de WhatsApp...
                       </div>
                   )}
               </div>
@@ -314,87 +397,187 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
 
           {/* PESTAÑA: INVENTARIO */}
           {activeTab === 'inventario' && (
-              <div className="flex flex-col lg:flex-row gap-8 max-w-7xl mx-auto">
-                  <div className="bg-[#131620] p-8 border border-white/5 rounded-2xl shadow-sm lg:w-1/3 flex-shrink-0 h-fit">
-                    <h3 className="text-base font-bold text-white mb-6 flex items-center gap-2"><Package className="w-5 h-5 text-purple-500"/> Nuevo Producto</h3>
-                    <form onSubmit={handleCreateProduct} className="flex flex-col gap-4">
-                      
-                      <div className="flex flex-col items-center">
-                         <div 
-                           className="w-32 h-32 rounded-2xl border-2 border-dashed border-white/10 bg-[#0b0e14] flex flex-col items-center justify-center mb-2 overflow-hidden relative cursor-pointer hover:border-purple-500/50 transition-colors"
-                           onClick={() => fileInputRef.current?.click()}
-                         >
-                            {imagePreview ? (
-                               <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                            ) : (
-                               <>
-                                  <UploadCloud className="w-8 h-8 text-slate-500 mb-1" />
-                                  <span className="text-[9px] font-bold text-slate-500 uppercase">Subir Foto</span>
-                               </>
-                            )}
-                         </div>
-                         <input type="file" accept="image/png, image/jpeg, image/webp" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
-                         <p className="text-[10px] text-slate-500">Recomendado: .webp o .png</p>
-                      </div>
-
-                      <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Nombre del Producto</label>
-                          <input type="text" value={newProductName} onChange={e => setNewProductName(e.target.value)} placeholder="Ej: Licuadora Oster..." className="w-full mt-1 p-2.5 bg-[#0b0e14] border border-white/5 rounded-xl text-sm font-semibold outline-none focus:ring-1 focus:ring-purple-500 text-white transition-all" required />
-                      </div>
-                      <div className="flex gap-4">
-                        <div className="flex-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Precio (S/)</label>
-                            <input type="number" step="0.01" value={newProductPrice} onChange={e => setNewProductPrice(e.target.value)} placeholder="0.00" className="w-full mt-1 p-2.5 bg-[#0b0e14] border border-white/5 rounded-xl text-sm font-semibold outline-none focus:ring-1 focus:ring-purple-500 text-white transition-all" required />
-                        </div>
-                        <div className="flex-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Stock</label>
-                            <input type="number" value={newProductStock} onChange={e => setNewProductStock(e.target.value)} placeholder="Ej: 10" className="w-full mt-1 p-2.5 bg-[#0b0e14] border border-white/5 rounded-xl text-sm font-semibold outline-none focus:ring-1 focus:ring-purple-500 text-white transition-all" required />
-                        </div>
-                      </div>
-                      <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Categoría</label>
-                          <select value={newProductCategory} onChange={e => setNewProductCategory(e.target.value)} className="w-full mt-1 p-2.5 bg-[#0b0e14] border border-white/5 rounded-xl text-sm font-semibold outline-none focus:ring-1 focus:ring-purple-500 text-white transition-all cursor-pointer">
-                              <option value="Televisores">Televisores</option>
-                              <option value="Línea Blanca">Línea Blanca</option>
-                              <option value="Pequeños">Pequeños Electrodomésticos</option>
-                              <option value="Audio y Video">Audio y Video</option>
-                              <option value="Tecnología">Tecnología</option>
-                          </select>
-                      </div>
-                      
-                      <button type="submit" className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 mt-2 transition-all shadow-lg shadow-purple-900/20">
-                          <Plus className="w-4 h-4"/> Guardar en Inventario
-                      </button>
-                    </form>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
+              {/* Formulario para agregar productos */}
+              <div className="lg:col-span-1 bg-[#131620] p-6 rounded-2xl border border-white/5 shadow-xl h-fit">
+                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><Plus className="w-5 h-5 text-purple-500"/> Nuevo Producto</h3>
+                <form onSubmit={handleCreateProduct} className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nombre del Producto</label>
+                    <input type="text" value={newProductName} onChange={e=>setNewProductName(e.target.value)} className="w-full mt-1 p-3 bg-[#0b0e14] border border-white/5 rounded-xl text-sm text-white focus:ring-1 focus:ring-purple-500 outline-none placeholder:text-slate-600" placeholder="Ej: Licuadora Clásica" required />
                   </div>
-
-                  {/* Lista de Productos */}
-                  <div className="flex-1">
-                    <h3 className="text-base font-bold text-white mb-6 flex items-center gap-2"><Package className="w-5 h-5 text-emerald-500"/> Catálogo Actual ({products.length})</h3>
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                        {products.length === 0 ? (
-                            <p className="text-sm text-slate-500 col-span-2 p-6 bg-[#131620] border border-dashed border-white/10 rounded-2xl text-center">No hay productos en el inventario.</p>
-                        ) : (
-                            products.map((p) => (
-                                <div key={p.id} className="bg-[#131620] p-4 border border-white/5 rounded-2xl shadow-sm hover:border-purple-500/30 transition-colors flex gap-4 items-center group">
-                                    <img src={p.image.startsWith('data:image') ? p.image : 'https://placehold.co/100'} alt={p.name} className="w-16 h-16 rounded-xl object-cover bg-white/5 border border-white/5" />
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-[10px] font-black uppercase tracking-widest text-purple-400 mb-0.5">{p.category}</p>
-                                        <p className="text-sm font-bold text-white leading-tight truncate" title={p.name}>{p.name}</p>
-                                        <div className="flex items-center gap-3 mt-1 text-xs">
-                                          <span className="font-bold text-emerald-400">S/ {Number(p.price).toLocaleString()}</span>
-                                          <span className={`font-medium ${p.stock > 0 ? 'text-slate-400' : 'text-rose-400'}`}>Stock: {p.stock}</span>
-                                        </div>
-                                    </div>
-                                    <button onClick={() => handleDeleteProduct(p.id, p.name)} className="p-2.5 text-slate-500 hover:text-rose-400 hover:bg-white/5 rounded-xl transition-colors opacity-0 group-hover:opacity-100" title="Eliminar Producto">
-                                        <Trash2 className="w-5 h-5" />
-                                    </button>
-                                </div>
-                            ))
-                        )}
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Marca</label>
+                      <input type="text" value={newProductBrand} onChange={e=>setNewProductBrand(e.target.value)} className="w-full mt-1 p-3 bg-[#0b0e14] border border-white/5 rounded-xl text-sm text-white focus:ring-1 focus:ring-purple-500 outline-none placeholder:text-slate-600" placeholder="Ej: Oster" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Categoría</label>
+                      <select value={newProductCategory} onChange={e=>setNewProductCategory(e.target.value)} className="w-full mt-1 p-3 bg-[#0b0e14] border border-white/5 rounded-xl text-sm text-white focus:ring-1 focus:ring-purple-500 outline-none">
+                        <option value="Licuadoras">Licuadoras</option>
+                        <option value="Televisores">Televisores</option>
+                        <option value="Refrigeradoras">Refrigeradoras</option>
+                        <option value="Cocinas">Cocinas</option>
+                        <option value="Lavadoras">Lavadoras</option>
+                        <option value="Otros">Otros</option>
+                      </select>
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Costo (S/)</label>
+                      <input type="number" step="0.01" value={newProductCost} onChange={e=>setNewProductCost(e.target.value)} className="w-full mt-1 p-3 bg-[#0b0e14] border border-white/5 rounded-xl text-sm text-white focus:ring-1 focus:ring-purple-500 outline-none placeholder:text-slate-600" placeholder="0.00" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Precio Venta (S/)</label>
+                      <input type="number" step="0.01" value={newProductPrice} onChange={e=>setNewProductPrice(e.target.value)} className="w-full mt-1 p-3 bg-[#0b0e14] border border-emerald-500/30 rounded-xl text-sm text-emerald-400 font-bold focus:ring-1 focus:ring-emerald-500 outline-none placeholder:text-emerald-900" placeholder="0.00" required />
+                    </div>
+                  </div>
+
+                  {/* Mostrar la ganancia estimada */}
+                  {newProductCost && newProductPrice && (
+                    <div className={`p-3 rounded-xl border flex justify-between items-center ${expectedProfit >= 0 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
+                      <span className="text-xs font-bold uppercase tracking-wider">Ganancia Estimada:</span>
+                      <span className="font-black">S/ {expectedProfit.toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Stock Inicial</label>
+                    <input type="number" value={newProductStock} onChange={e=>setNewProductStock(e.target.value)} className="w-full mt-1 p-3 bg-[#0b0e14] border border-white/5 rounded-xl text-sm text-white focus:ring-1 focus:ring-purple-500 outline-none placeholder:text-slate-600" placeholder="Ej: 10" />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Foto del Producto</label>
+                    <input type="file" accept="image/png, image/jpeg, image/webp" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-32 border-2 border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-white hover:border-purple-500 hover:bg-purple-500/5 transition-all group">
+                      {imagePreview ? (
+                        <div className="relative w-full h-full p-2">
+                          <img src={imagePreview} alt="Preview" className="w-full h-full object-contain rounded-lg" />
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-lg">
+                            <span className="text-xs font-bold text-white">Cambiar Foto</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <ImageIcon className="w-8 h-8 mb-2 opacity-50 group-hover:opacity-100 transition-opacity" />
+                          <span className="text-sm font-bold">Haz clic para subir foto</span>
+                          <span className="text-xs opacity-50 mt-1">PNG, JPG o WEBP</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <button type="submit" className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-purple-900/30 flex items-center justify-center gap-2 mt-4">
+                    <Plus className="w-5 h-5"/> Guardar en Inventario
+                  </button>
+                </form>
               </div>
+
+              {/* LISTA/TABLA DE CATÁLOGO (CON PAGINACIÓN) */}
+              <div className="lg:col-span-2 bg-[#131620] rounded-2xl border border-white/5 shadow-xl overflow-hidden flex flex-col h-[calc(100vh-12rem)]">
+                <div className="p-6 border-b border-white/5 bg-[#0b0e14] flex justify-between items-center">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2"><Package className="w-5 h-5 text-purple-500"/> Catálogo Actual</h3>
+                  <span className="text-xs font-bold text-purple-400 bg-purple-500/10 px-3 py-1 rounded-full border border-purple-500/20">{products.length} Productos Totales</span>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 flex flex-col">
+                  {products.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center text-slate-500 h-full">
+                      <Package className="w-16 h-16 mb-4 opacity-20" />
+                      <p>Tu catálogo está vacío.</p>
+                      <p className="text-sm">Agrega productos en el panel izquierdo para comenzar a cotizar.</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3 flex-1">
+                        {products
+                          .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                          .map((product) => {
+                          const profit = Number(product.price) - Number(product.cost_price || 0);
+                          return (
+                            <div key={product.id} className="bg-[#0b0e14] rounded-xl border border-white/5 hover:border-purple-500/30 transition-colors group relative overflow-hidden flex items-center p-3 gap-4">
+                              
+                              <button onClick={() => handleDeleteProduct(product.id, product.name)} className="absolute top-1/2 -translate-y-1/2 right-4 text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-500/20 p-2 rounded-lg z-10 bg-[#0b0e14]">
+                                <Trash2 className="w-5 h-5" />
+                              </button>
+                              
+                              {/* Imagen Horizontal */}
+                              <div className="h-16 w-16 bg-white/5 flex items-center justify-center rounded-lg border border-white/10 p-1 flex-shrink-0">
+                                {product.image && product.image.length > 10 ? (
+                                  <img src={product.image.startsWith('data:image') ? product.image : `data:image/jpeg;base64,${product.image}`} alt={product.name} className="w-full h-full object-cover rounded" />
+                                ) : (
+                                  <ImageIcon className="w-6 h-6 text-slate-600" />
+                                )}
+                              </div>
+
+                              {/* Datos del Producto */}
+                              <div className="flex-1 min-w-0 pr-12">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-[10px] font-black text-purple-400 uppercase tracking-widest px-2 py-0.5 bg-purple-500/10 rounded">
+                                      {product.category}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                      {product.brand || "GENÉRICO"}
+                                  </span>
+                                </div>
+                                <h4 className="font-bold text-white text-sm truncate" title={product.name}>{product.name}</h4>
+                                
+                                <div className="flex items-center gap-6 mt-1">
+                                  <div className="flex items-center gap-2">
+                                     <span className="text-[10px] text-slate-500 uppercase font-bold">Costo:</span>
+                                     <span className="text-xs font-medium text-slate-300">S/ {Number(product.cost_price || 0).toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                     <span className="text-[10px] text-emerald-500/70 uppercase font-bold">Utilidad:</span>
+                                     <span className="text-xs font-bold text-emerald-500">S/ {profit.toFixed(2)}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Columna Derecha (Precio y Stock) */}
+                              <div className="flex flex-col items-end flex-shrink-0 pr-2 border-l border-white/5 pl-4">
+                                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Precio Público</p>
+                                <p className="text-lg font-black text-emerald-400 mb-1">S/ {Number(product.price).toLocaleString()}</p>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${product.stock > 0 ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>
+                                  Stock: {product.stock > 0 ? product.stock : '0'}
+                                </span>
+                              </div>
+
+                            </div>
+                          )
+                        })}
+
+                        {/* Controles de Paginación */}
+                        {products.length > itemsPerPage && (
+                          <div className="mt-auto pt-4 flex justify-between items-center border-t border-white/5">
+                            <span className="text-xs text-slate-500 font-medium">
+                              Mostrando {(currentPage - 1) * itemsPerPage + 1} a {Math.min(currentPage * itemsPerPage, products.length)} de {products.length}
+                            </span>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                                className="px-3 py-1.5 text-xs font-bold text-white bg-white/5 hover:bg-white/10 disabled:opacity-30 rounded-lg transition-colors border border-white/5"
+                              >
+                                Anterior
+                              </button>
+                              <button 
+                                onClick={() => setCurrentPage(p => Math.min(Math.ceil(products.length / itemsPerPage), p + 1))}
+                                disabled={currentPage === Math.ceil(products.length / itemsPerPage)}
+                                className="px-3 py-1.5 text-xs font-bold text-white bg-white/5 hover:bg-white/10 disabled:opacity-30 rounded-lg transition-colors border border-white/5"
+                              >
+                                Siguiente
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
 
           {/* PESTAÑA: CHATBOT */}
@@ -407,8 +590,6 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
                     </div>
 
                     <form onSubmit={handleSaveBotSettings} className="flex flex-col gap-6">
-                      
-                      {/* Mensaje de Saludo Principal */}
                       <div className="bg-[#0b0e14] border border-white/5 p-4 rounded-xl">
                           <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2 mb-2">
                              <MessageSquare className="w-3 h-3 text-emerald-500"/> Saludo Principal (Menú)
@@ -423,7 +604,6 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Opción 1 */}
                           <div className="bg-[#0b0e14] border border-white/5 p-4 rounded-xl">
                               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 block text-purple-400">Respuesta a Opción 1 (Ventas)</label>
                               <textarea 
@@ -434,7 +614,6 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
                               />
                           </div>
 
-                          {/* Opción 2 */}
                           <div className="bg-[#0b0e14] border border-white/5 p-4 rounded-xl">
                               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 block text-blue-400">Respuesta a Opción 2 (Soporte)</label>
                               <textarea 
@@ -445,7 +624,6 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
                               />
                           </div>
 
-                          {/* Opción 3 */}
                           <div className="bg-[#0b0e14] border border-white/5 p-4 rounded-xl">
                               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 block text-amber-400">Respuesta a Opción 3 (Envíos)</label>
                               <textarea 
@@ -456,7 +634,6 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
                               />
                           </div>
 
-                          {/* Opción 4 */}
                           <div className="bg-[#0b0e14] border border-white/5 p-4 rounded-xl">
                               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 block text-emerald-400">Respuesta a Opción 4 (Asesor)</label>
                               <textarea 
@@ -476,6 +653,7 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
               </div>
           )}
 
+          {/* PESTAÑA: SEGURIDAD */}
           {activeTab === 'seguridad' && (
               <div className="flex flex-col items-center justify-center h-64 border border-dashed border-white/10 rounded-3xl bg-[#131620]">
                   <Settings className="w-10 h-10 text-slate-600 mb-3" />

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
-import { MessageSquare, Settings, Zap, Plus, Trash2, X, Tag, LogIn, Lock, Kanban, LayoutDashboard, LogOut, ChevronLeft, ChevronRight, CalendarDays, Package, Archive } from "lucide-react";
+import { MessageSquare, Settings, Zap, Plus, Trash2, X, Tag, LogIn, Lock, Kanban, LayoutDashboard, LogOut, ChevronLeft, ChevronRight, CalendarDays, Package, Archive, Contact, FileText } from "lucide-react";
 import { Chat, Message, QuickReply, CustomLabel, CRMData } from "../types";
 
 import Sidebar from "../components/Sidebar"; 
@@ -13,6 +13,8 @@ import KanbanBoard from "../components/KanbanBoard";
 import AgendaPanel from "../components/AgendaPanel";
 import CatalogModal from "../components/CatalogModal"; 
 import ChatPanel from "../components/ChatPanel"; 
+import CustomersDirectory from "../components/CustomersDirectory";
+import QuotesManager from "../components/QuotesManager";
 
 const socket = io("https://jared-crm-backend.onrender.com");
 
@@ -44,7 +46,7 @@ const COLOR_OPTIONS = [
 
 const DEFAULT_CRM_DATA: CRMData = { fullName: "", documentId: "", email: "", altPhone: "", address: "", district: "", reference: "", customerType: "Minorista" };
 
-type AppView = 'chats' | 'kanban' | 'stats' | 'admin' | 'agenda';
+type AppView = 'chats' | 'kanban' | 'stats' | 'admin' | 'agenda' | 'directory' | 'quotes';
 
 export default function Dashboard() {
   const [agentName, setAgentName] = useState<string | null>(null);
@@ -98,6 +100,9 @@ export default function Dashboard() {
   const [loadingMessage, setLoadingMessage] = useState<string>("");
   const [isAutoPilotActive, setIsAutoPilotActive] = useState<boolean>(false);
 
+  // 🛡️ ESCUDO ANTI-ANSIEDAD: Evita que el frontend pida los chats en bucle
+  const hasRequestedChats = useRef(false);
+
   useEffect(() => {
     const savedAgent = localStorage.getItem("crm_agent_name");
     const savedRole = localStorage.getItem("crm_agent_role");
@@ -109,11 +114,21 @@ export default function Dashboard() {
 
     const onReady = () => { 
         setIsConnected(true); 
-        socket.emit("request-chats"); 
+        // Solo pide los chats si NO lo ha hecho antes
+        if (!hasRequestedChats.current) {
+            hasRequestedChats.current = true;
+            socket.emit("request-chats"); 
+        }
+    };
+
+    const onDisconnect = () => {
+        setIsConnected(false);
+        hasRequestedChats.current = false; // Reseteamos por si el bot se reinicia
     };
     
     const onLoadChats = (loadedChats: Chat[]) => {
         setChats(loadedChats);
+        // Si recibimos los chats, ocultamos la barra de carga de inmediato
         setLoadingPercent(0); 
         setLoadingMessage("");
     };
@@ -127,6 +142,7 @@ export default function Dashboard() {
     
     socket.on('login-error', (msg) => { setLoginError(msg); });
     socket.on("whatsapp-ready", onReady);
+    socket.on("whatsapp-disconnected", onDisconnect);
     socket.on("load-chats", onLoadChats);
     socket.on("connect", () => socket.emit("check-status"));
     
@@ -138,11 +154,29 @@ export default function Dashboard() {
     if (socket.connected) socket.emit("check-status");
 
     return () => { 
-        socket.off("whatsapp-ready", onReady); socket.off("load-chats", onLoadChats); 
-        socket.off("connect"); socket.off("login-success"); socket.off("login-error");
+        socket.off("whatsapp-ready", onReady); 
+        socket.off("whatsapp-disconnected", onDisconnect); 
+        socket.off("load-chats", onLoadChats); 
+        socket.off("connect"); 
+        socket.off("login-success"); 
+        socket.off("login-error");
         socket.off("session-loading"); 
     };
   }, []);
+
+  // 🛡️ REINTENTO INTELIGENTE (Smart Retry)
+  useEffect(() => {
+    let retryInterval: NodeJS.Timeout;
+    if (isConnected && chats.length === 0) {
+        retryInterval = setInterval(() => {
+            console.log("🔄 Reintentando obtener chats de WhatsApp...");
+            socket.emit("request-chats");
+        }, 4000);
+    }
+    return () => {
+        if (retryInterval) clearInterval(retryInterval);
+    };
+  }, [isConnected, chats.length]);
 
   useEffect(() => {
     socket.on('ai-reply-success', (data) => {
@@ -179,13 +213,9 @@ export default function Dashboard() {
         setIsTranscribing({}); 
     });
 
-    // 🌟 NUEVOS LISTENERS: Para la creación de cotizaciones y enlaces mágicos
     socket.on('quote-created', (data: { quoteId: string, quoteUrl: string, contactId: string, text: string }) => {
         if (data.contactId) {
-            // Agregamos el enlace mágico al final del mensaje base que habíamos creado
             const finalMessage = `${data.text}✨ *Visualiza y paga tu cotización aquí:*\n${data.quoteUrl}\n\n_¿Te gustaría que procedamos con la compra o tienes alguna duda adicional?_`;
-            
-            // AHORA SÍ enviamos el mensaje completo con el enlace a WhatsApp
             socket.emit("send-message", {
                 to: data.contactId,
                 text: finalMessage,
@@ -309,13 +339,10 @@ export default function Dashboard() {
       setMessages([]); setShowContactInfo(false); setIsNoteMode(false); setAttachment(null);
       setCrmForm(activeChat.crmData || DEFAULT_CRM_DATA);
       socket.emit("request-history", activeChat.id);
-      
-      // 🌟 PREGUNTAR AL SERVIDOR SI EL PILOTO AUTOMÁTICO ESTÁ ENCENDIDO PARA ESTE CHAT
       socket.emit('check-autopilot', activeChat.id);
     }
   }, [activeChat?.id]); 
 
-  // ⬇️ Auto-Scroll mágico al último mensaje
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "auto" });
@@ -370,7 +397,6 @@ export default function Dashboard() {
 
   const handleSendQuote = (cart: any, total: number | string | undefined) => {
     if (activeChat && socket) {
-      // 🛡️ TRADUCTOR Y VALIDADOR DE CARRO DE COMPRAS BLINDADO
       let cartItems: any[] = [];
       if (Array.isArray(cart)) {
           cartItems = cart;
@@ -397,7 +423,6 @@ export default function Dashboard() {
       const safeTotal = Number(total) || 0;
       baseMessageText += `----------------------------\n💰 *TOTAL A PAGAR: S/ ${safeTotal.toFixed(2)}*\n\n`;
 
-      // 🛡️ SOLUCIÓN: Solo le pedimos al servidor que cree la cotización, NO mandamos el mensaje aún.
       socket.emit("create-quote", {
         contactId: activeChat.id,
         items: cartItems, 
@@ -623,6 +648,11 @@ export default function Dashboard() {
 
          <div className={`flex flex-col gap-1 w-full ${isNavCollapsed ? 'px-2' : 'px-4'}`}>
              
+             <button onClick={() => setCurrentView('directory')} className={`w-full py-3 rounded-xl flex items-center transition-all ${isNavCollapsed ? 'justify-center px-0' : 'px-4 gap-3'} ${currentView === 'directory' ? 'bg-purple-600/10 text-purple-400 border border-purple-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`} title="Directorio de Clientes">
+                <Contact className="w-5 h-5 flex-shrink-0" />
+                {!isNavCollapsed && <span className="text-sm font-semibold truncate">Directorio de Clientes</span>}
+             </button>
+
              <button onClick={() => setCurrentView('kanban')} className={`w-full py-3 rounded-xl flex items-center transition-all ${isNavCollapsed ? 'justify-center px-0' : 'px-4 gap-3'} ${currentView === 'kanban' ? 'bg-purple-600/10 text-purple-400 border border-purple-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`} title="Embudo de Ventas">
                 <Kanban className="w-5 h-5 flex-shrink-0" />
                 {!isNavCollapsed && <span className="text-sm font-semibold truncate">Embudo de Ventas</span>}
@@ -631,6 +661,11 @@ export default function Dashboard() {
              <button onClick={() => setCurrentView('agenda')} className={`w-full py-3 rounded-xl flex items-center transition-all ${isNavCollapsed ? 'justify-center px-0' : 'px-4 gap-3'} ${currentView === 'agenda' ? 'bg-purple-600/10 text-purple-400 border border-purple-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`} title="Agenda y Follow-ups">
                 <CalendarDays className="w-5 h-5 flex-shrink-0" />
                 {!isNavCollapsed && <span className="text-sm font-semibold truncate">Agenda y Tareas</span>}
+             </button>
+
+             <button onClick={() => setCurrentView('quotes')} className={`w-full py-3 rounded-xl flex items-center transition-all ${isNavCollapsed ? 'justify-center px-0' : 'px-4 gap-3'} ${currentView === 'quotes' ? 'bg-purple-600/10 text-purple-400 border border-purple-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`} title="Finanzas y Cotizaciones">
+                <FileText className="w-5 h-5 flex-shrink-0" />
+                {!isNavCollapsed && <span className="text-sm font-semibold truncate">Finanzas</span>}
              </button>
 
              <button onClick={() => setCurrentView('chats')} className={`w-full py-3 rounded-xl flex items-center justify-between transition-all ${isNavCollapsed ? 'justify-center px-0' : 'px-4 gap-3'} ${currentView === 'chats' ? 'bg-purple-600/10 text-purple-400 border border-purple-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`} title="Mensajes (Chat)">
@@ -670,6 +705,18 @@ export default function Dashboard() {
 
       <div className="flex-1 flex overflow-hidden">
           
+          {currentView === 'directory' && (
+              <div className="flex-1 w-full bg-[#0b0e14] relative">
+                  <CustomersDirectory socket={socket} />
+              </div>
+          )}
+
+          {currentView === 'quotes' && (
+              <div className="flex-1 w-full bg-[#0b0e14] relative">
+                  <QuotesManager socket={socket} />
+              </div>
+          )}
+
           {currentView === 'chats' && (
               <>
                   <Sidebar 
