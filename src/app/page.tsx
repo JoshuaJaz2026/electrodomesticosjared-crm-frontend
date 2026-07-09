@@ -17,6 +17,7 @@ import CustomersDirectory from "../components/CustomersDirectory";
 import QuotesManager from "../components/QuotesManager";
 
 const socket = io("https://jared-crm-backend.onrender.com");
+// const socket = io("http://localhost:3001");
 
 const DEFAULT_REPLIES: QuickReply[] = [
   { shortcut: "/saludo", text: "¡Hola! Gracias por comunicarte con Electrodomésticos Jared. ¿En qué te podemos ayudar hoy?" },
