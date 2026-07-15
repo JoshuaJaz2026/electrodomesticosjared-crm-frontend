@@ -37,7 +37,8 @@ export default function AdminPanel({ isOpen, onClose, agentName, agentRole, sock
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [newUserRole, setNewUserRole] = useState("asesor");
+  // 🚨 CORRECCIÓN: El valor inicial debe coincidir con el backend (Agente)
+  const [newUserRole, setNewUserRole] = useState("Agente"); 
   const [userError, setUserError] = useState("");
   
   // Estados para Inventario (Avanzado)
@@ -367,8 +368,10 @@ export default function AdminPanel({ isOpen, onClose, agentName, agentRole, sock
                       <div>
                           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Rol</label>
                           <select value={newUserRole} onChange={e => setNewUserRole(e.target.value)} className="w-full mt-2 p-3 bg-[#0b0e14] border border-white/5 rounded-xl text-sm font-semibold outline-none focus:ring-1 focus:ring-purple-500 text-white transition-all cursor-pointer">
-                              <option value="asesor">Asesor Estándar</option>
-                              <option value="admin">Administrador Global</option>
+                              {/* 🚨 CORRECCIÓN: Opciones exactas alineadas con tu arquitectura */}
+                              <option value="Agente">Asesor Estándar (Atiende chats)</option>
+                              <option value="admin">Administrador (El Jefe)</option>
+                              <option value="superadmin">Superadmin (Dios del Sistema)</option>
                           </select>
                       </div>
                       {userError && <p className="text-xs text-rose-400 font-bold bg-rose-500/10 border border-rose-500/20 p-2 rounded-lg text-center">{userError}</p>}
