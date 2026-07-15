@@ -635,7 +635,7 @@ export default function Dashboard() {
 
          <div className={`px-6 flex items-center gap-3 mb-10 ${isNavCollapsed ? 'justify-center px-0' : ''}`}>
             <div className="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-purple-600/30 flex-shrink-0">
-                {agentName.substring(0,2).toUpperCase()}
+                {agentName?.substring(0,2).toUpperCase()}
             </div>
             {!isNavCollapsed && <h1 className="text-xl font-black text-white tracking-tight truncate">JARED<span className="text-slate-500 font-medium">CRM</span></h1>}
          </div>
@@ -694,7 +694,25 @@ export default function Dashboard() {
              </>
          )}
 
+         {/* 🌟 NUEVO PERFIL MODERNO Y BOTÓN DE CERRAR SESIÓN 🌟 */}
          <div className={`mt-auto ${isNavCollapsed ? 'px-2' : 'px-6'}`}>
+             
+             {/* Tarjeta de Perfil */}
+             <div className={`bg-[#0b0e14] border border-white/5 rounded-xl p-3 mb-3 flex items-center gap-3 transition-all hover:border-white/10 ${isNavCollapsed ? 'justify-center' : ''}`}>
+                 <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-black flex-shrink-0 shadow-inner">
+                     {agentName?.substring(0,2).toUpperCase()}
+                 </div>
+                 {!isNavCollapsed && (
+                     <div className="flex flex-col min-w-0">
+                         <span className="text-sm font-bold text-white truncate">{agentName}</span>
+                         <span className={`text-[9px] font-black uppercase tracking-widest truncate mt-0.5 ${agentRole === 'superadmin' ? 'text-rose-400' : agentRole === 'admin' ? 'text-purple-400' : 'text-emerald-400'}`}>
+                             {agentRole}
+                         </span>
+                     </div>
+                 )}
+             </div>
+
+             {/* Botón de Salir */}
              <button onClick={handleLogout} className={`w-full flex items-center justify-center gap-2 text-slate-400 hover:text-white transition-colors p-3 rounded-xl bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 border border-white/5`} title="Cerrar Sesión">
                 <LogOut className="w-4 h-4 flex-shrink-0" /> 
                 {!isNavCollapsed && <span className="text-sm font-semibold truncate">Cerrar Sesión</span>}
