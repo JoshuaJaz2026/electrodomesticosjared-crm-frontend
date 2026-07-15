@@ -26,6 +26,42 @@ export default function CustomersDirectory({ socket }: { socket: any }) {
     (c.document_id || "").includes(searchTerm)
   );
 
+  // 🌟 MAGIA: Convertir los datos a CSV y descargarlos
+  const exportToCSV = () => {
+    if (contacts.length === 0) return alert("No hay datos para exportar.");
+
+    // 1. Definir las cabeceras de Excel
+    const headers = ["Numero_WhatsApp", "Nombre_Perfil", "Nombre_Real", "DNI_RUC", "Tipo_Cliente", "Etiqueta", "Ultima_Interaccion"];
+    
+    // 2. Mapear los datos
+    const csvRows = contacts.map(c => {
+      const phone = c.id ? c.id.split('@')[0] : '';
+      // Envolvemos en comillas por si hay comas en los nombres
+      return [
+        phone,
+        `"${c.name || ''}"`,
+        `"${c.full_name || ''}"`,
+        c.document_id || '',
+        c.customer_type || '',
+        c.label || 'Sin etiqueta',
+        `"${c.last_seen || ''}"`
+      ].join(",");
+    });
+
+    // 3. Unir todo con saltos de línea
+    const csvContent = [headers.join(","), ...csvRows].join("\n");
+
+    // 4. Crear el archivo descargable
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Jared_CRM_Clientes_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0f111a] animate-in fade-in duration-300">
       {/* Cabecera */}
@@ -39,7 +75,10 @@ export default function CustomersDirectory({ socket }: { socket: any }) {
           </p>
         </div>
         <div className="flex gap-3">
-          <button className="bg-white/5 hover:bg-white/10 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all border border-white/5 flex items-center gap-2">
+          <button 
+            onClick={exportToCSV}
+            className="bg-white/5 hover:bg-white/10 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all border border-white/5 flex items-center gap-2"
+          >
             <Download className="w-4 h-4" /> Exportar CSV
           </button>
         </div>
