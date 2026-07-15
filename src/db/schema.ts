@@ -7,7 +7,7 @@ export const contacts = pgTable("contacts", {
   lastMessage: text("last_message"),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
-
+//
 // Tabla del Historial de Mensajes
 export const messages = pgTable("messages", {
   id: text("id").primaryKey(), 
