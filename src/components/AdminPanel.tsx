@@ -26,10 +26,11 @@ type AdminPanelProps = {
   isOpen: boolean;
   onClose: () => void;
   agentName: string;
+  agentRole: string; // 🛡️ EL CANDADO: Requerimos saber el rol
   socket: any;
 };
 
-export default function AdminPanel({ isOpen, onClose, agentName, socket }: AdminPanelProps) {
+export default function AdminPanel({ isOpen, onClose, agentName, agentRole, socket }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState('conexiones');
   
   // Estados para Usuarios
@@ -53,7 +54,7 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
 
   // Estados de Paginación
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 6; // Cuántos productos se mostrarán por página
+  const itemsPerPage = 6; 
 
   // Estados para el Chatbot
   const [botSettings, setBotSettings] = useState<BotSettings>({
@@ -73,7 +74,11 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
   useEffect(() => {
     if (!isOpen) return;
     
-    socket.emit('get-users');
+    // 🛡️ Seguridad extra: Solo cargar usuarios si es superadmin
+    if (agentRole === 'superadmin') {
+        socket.emit('get-users');
+    }
+
     socket.emit('get-products');
     socket.emit('get-bot-settings');
     socket.emit('check-status');
@@ -90,7 +95,7 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
 
     // ESCUCHADORES DE CONEXIÓN
     socket.on('whatsapp-qr', (qr: string) => {
-    if (!isPairingLocked) { // EL ESCUDO: Solo actualiza el QR si no estás vinculando por código
+    if (!isPairingLocked) {
         setQrCode(qr);
         setIsBotConnected(false);
         setPairingCode(null);
@@ -130,7 +135,7 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
       socket.off('whatsapp-ready');
       socket.off('whatsapp-disconnected');
     };
-  }, [isOpen, socket]);
+  }, [isOpen, socket, agentRole]);
 
   // Funciones de Usuarios
   const handleCreateUser = (e: React.FormEvent) => {
@@ -202,12 +207,11 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
     e.preventDefault();
     if (!phoneNumber.trim()) return alert("Ingresa un número válido");
     setIsRequestingCode(true);
-    setIsPairingLocked(true); // ACTIVAR EL ESCUDO
+    setIsPairingLocked(true); 
     setPairingError("");
     socket.emit('request-pairing-code', { phoneNumber });
-};
+  };
 
-  // Calculadora de ganancia en tiempo real
   const expectedProfit = (Number(newProductPrice) || 0) - (Number(newProductCost) || 0);
 
   if (!isOpen) return null;
@@ -226,7 +230,12 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
         
         <div className="flex gap-1 bg-[#0b0e14] p-1 rounded-xl border border-white/5">
              <button onClick={() => setActiveTab('conexiones')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'conexiones' ? 'bg-blue-600 shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Smartphone className="w-4 h-4"/> Conexiones</button>
-             <button onClick={() => setActiveTab('usuarios')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'usuarios' ? 'bg-[#1a1d2d] shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Users className="w-4 h-4"/> Asesores</button>
+             
+             {/* 🛡️ PESTAÑA OCULTA: SOLO VISIBLE PARA SUPERADMIN */}
+             {agentRole === 'superadmin' && (
+                 <button onClick={() => setActiveTab('usuarios')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'usuarios' ? 'bg-[#1a1d2d] shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Users className="w-4 h-4"/> Asesores</button>
+             )}
+
              <button onClick={() => setActiveTab('inventario')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'inventario' ? 'bg-purple-600 shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Package className="w-4 h-4"/> Inventario</button>
              <button onClick={() => setActiveTab('chatbot')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'chatbot' ? 'bg-emerald-600 shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Bot className="w-4 h-4"/> Chatbot</button>
              <button onClick={() => setActiveTab('seguridad')} className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'seguridad' ? 'bg-[#1a1d2d] shadow-sm text-white' : 'text-slate-500 hover:text-white'}`}><Settings className="w-4 h-4"/> Seguridad</button>
@@ -341,8 +350,8 @@ export default function AdminPanel({ isOpen, onClose, agentName, socket }: Admin
               </div>
           )}
 
-          {/* PESTAÑA: USUARIOS */}
-          {activeTab === 'usuarios' && (
+          {/* 🛡️ PESTAÑA: USUARIOS (CONTENIDO SOLO PARA SUPERADMIN) */}
+          {activeTab === 'usuarios' && agentRole === 'superadmin' && (
               <div className="flex flex-col lg:flex-row gap-8 max-w-6xl mx-auto">
                   <div className="bg-[#131620] p-8 border border-white/5 rounded-2xl shadow-sm lg:w-1/3 flex-shrink-0 h-fit">
                     <h3 className="text-base font-bold text-white mb-6 flex items-center gap-2"><Plus className="w-5 h-5 text-purple-500"/> Agregar Usuario</h3>

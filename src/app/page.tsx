@@ -92,7 +92,6 @@ export default function Dashboard() {
   const [globalReminders, setGlobalReminders] = useState<any[]>([]);
   const notifiedReminders = useRef<Set<number>>(new Set());
 
-  // 🌟 ESTADOS PARA INTELIGENCIA ARTIFICIAL Y BARRA DE CARGA
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [isAISummarizing, setIsAISummarizing] = useState(false);
   const [transcriptions, setTranscriptions] = useState<Record<string, string>>({});
@@ -101,7 +100,6 @@ export default function Dashboard() {
   const [loadingMessage, setLoadingMessage] = useState<string>("");
   const [isAutoPilotActive, setIsAutoPilotActive] = useState<boolean>(false);
 
-  // 🛡️ ESCUDO ANTI-ANSIEDAD: Evita que el frontend pida los chats en bucle
   const hasRequestedChats = useRef(false);
 
   useEffect(() => {
@@ -115,7 +113,6 @@ export default function Dashboard() {
 
     const onReady = () => { 
         setIsConnected(true); 
-        // Solo pide los chats si NO lo ha hecho antes
         if (!hasRequestedChats.current) {
             hasRequestedChats.current = true;
             socket.emit("request-chats"); 
@@ -124,12 +121,11 @@ export default function Dashboard() {
 
     const onDisconnect = () => {
         setIsConnected(false);
-        hasRequestedChats.current = false; // Reseteamos por si el bot se reinicia
+        hasRequestedChats.current = false; 
     };
     
     const onLoadChats = (loadedChats: Chat[]) => {
         setChats(loadedChats);
-        // Si recibimos los chats, ocultamos la barra de carga de inmediato
         setLoadingPercent(0); 
         setLoadingMessage("");
     };
@@ -165,7 +161,6 @@ export default function Dashboard() {
     };
   }, []);
 
-  // 🛡️ REINTENTO INTELIGENTE (Smart Retry)
   useEffect(() => {
     let retryInterval: NodeJS.Timeout;
     if (isConnected && chats.length === 0) {
@@ -510,6 +505,7 @@ export default function Dashboard() {
       });
   };
 
+  // 🛡️ EL FILTRO DE PRIVACIDAD MAESTRO YA ESTÁ AQUÍ
   const filteredChats = chats.filter(chat => {
     const matchesSearch = chat.name.toLowerCase().includes(searchTerm.toLowerCase()) || chat.id.includes(searchTerm);
     
@@ -522,7 +518,8 @@ export default function Dashboard() {
         matchesFilter = chat.label === activeFilter && chat.label !== "Archivado";
     }
     
-    const matchesAgent = agentRole === 'admin' 
+    // 🛡️ EL CANDADO DE SUPERADMIN: Si es admin o superadmin ve todo, si es Agente solo ve los suyos
+    const matchesAgent = (agentRole === 'admin' || agentRole === 'superadmin') 
        ? true 
        : (chat.assignedTo === agentName || !chat.assignedTo);
        
@@ -678,7 +675,8 @@ export default function Dashboard() {
              </button>
          </div>
 
-         {agentRole === 'admin' && (
+         {/* 🛡️ EL CANDADO DE SUPERADMIN EN LA BARRA LATERAL */}
+         {(agentRole === 'admin' || agentRole === 'superadmin') && (
              <>
                 <div className={`mt-8 mb-3 ${isNavCollapsed ? 'px-0 text-center' : 'px-6'}`}>
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{isNavCollapsed ? '---' : 'Soporte'}</p>
@@ -799,15 +797,22 @@ export default function Dashboard() {
               </div>
           )}
 
-          {currentView === 'stats' && agentRole === 'admin' && (
+          {/* 🛡️ PASANDO EL ROL DE SUPERADMIN A LOS PANELES */}
+          {currentView === 'stats' && (agentRole === 'admin' || agentRole === 'superadmin') && (
               <div className="flex-1 w-full bg-[#0b0e14] relative">
                   <StatsPanel isOpen={true} onClose={() => setCurrentView('chats')} socket={socket} />
               </div>
           )}
 
-          {currentView === 'admin' && agentRole === 'admin' && (
+          {currentView === 'admin' && (agentRole === 'admin' || agentRole === 'superadmin') && (
               <div className="flex-1 w-full bg-[#0b0e14] relative">
-                  <AdminPanel isOpen={true} onClose={() => setCurrentView('chats')} agentName={agentName || ""} socket={socket} />
+                  <AdminPanel 
+                    isOpen={true} 
+                    onClose={() => setCurrentView('chats')} 
+                    agentName={agentName || ""} 
+                    agentRole={agentRole} // Pasamos el rol aquí
+                    socket={socket} 
+                  />
               </div>
           )}
 

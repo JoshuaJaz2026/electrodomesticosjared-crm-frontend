@@ -160,15 +160,32 @@ export default function Sidebar({
                   {chat.name.substring(0, 1).toUpperCase()}
                   <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#0b0e14] rounded-full"></span>
                 </div>
+                
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-start mb-1">
-                    <h3 className={`font-bold truncate text-sm ${activeChat?.id === chat.id ? 'text-white' : 'text-slate-300'}`}>{chat.name}</h3>
+                    
+                    {/* ENVOLTORIO FLEX PARA EL NOMBRE Y LA ETIQUETA DEL ASESOR */}
+                    <div className="flex items-center gap-2 overflow-hidden">
+                        <h3 className={`font-bold truncate text-sm ${activeChat?.id === chat.id ? 'text-white' : 'text-slate-300'}`}>
+                          {chat.name}
+                        </h3>
+                        
+                        {/* 🌟 LA NUEVA ETIQUETA DE ASIGNACIÓN (ROUND-ROBIN) 🌟 */}
+                        {chat.assignedTo && (
+                           <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30 whitespace-nowrap flex-shrink-0 uppercase font-black tracking-wider">
+                             👤 {chat.assignedTo}
+                           </span>
+                        )}
+                    </div>
+
+                    {/* ETIQUETA DE ESTADO (PENDIENTE, VENTA CERRADA, ETC.) */}
                     {chat.label && chat.label !== "Archivado" && (
                       <span className={`px-1.5 py-0.5 text-[8px] font-black rounded uppercase tracking-wider ml-2 flex-shrink-0 ${getLabelColor(chat.label)}`}>
                         {chat.label}
                       </span>
                     )}
                   </div>
+                  
                   <p className="text-xs text-slate-500 truncate">{chat.lastMessage?.body || chat.lastMessage}</p>
                 </div>
               </div>
